@@ -1,0 +1,5 @@
+# Ignore the Snowflake/target directory
+kinesis-data-streams-flink-bedrock-opensearch-serverless/flink-bedrock/target/
+
+# Ignore the .idea directory within Snowflake
+kinesis-data-streams-flink-bedrock-opensearch-serverless/flink-bedrock/.idea/
