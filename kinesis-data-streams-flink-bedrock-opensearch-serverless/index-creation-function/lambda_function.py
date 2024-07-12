@@ -53,6 +53,13 @@ def lambda_handler(event, context):
 
     # Retrieve environment variables
     host = os.environ['aosDomain']
+    embeddingModel = os.environ['embeddingModel']
+
+    if embeddingModel=='titan-v1':
+        dimension=1536
+    elif embeddingModel=='titan-v2':
+        dimension=1024
+
     index_name = 'kds-flink-aoss-rag-index'
 
     # Define the index body
@@ -61,7 +68,7 @@ def lambda_handler(event, context):
             "properties": {
                 "passage_embedding": {
                     "type": "knn_vector",
-                    "dimension": 1536,
+                    "dimension": dimension,
                     "method": {
                         "name": "hnsw",
                         "space_type": "l2",

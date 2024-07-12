@@ -16,6 +16,7 @@ import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
@@ -28,9 +29,12 @@ public class BedRockEmbeddingModelAsyncCustomMessage extends RichAsyncFunction<J
 
     private transient BedrockRuntimeAsyncClient bedrockClient;
     private String region;
+    private String embeddingModel;
 
-    public BedRockEmbeddingModelAsyncCustomMessage(String region) {
+
+    public BedRockEmbeddingModelAsyncCustomMessage(String region, String embeddingModel) {
         this.region = region;
+        this.embeddingModel = embeddingModel;
     }
 
     /**
@@ -71,10 +75,18 @@ public class BedRockEmbeddingModelAsyncCustomMessage extends RichAsyncFunction<J
                             .put("inputText", stringBody);
 
                     SdkBytes body = SdkBytes.fromUtf8String(jsonBody.toString());
+                    String modelId = new String();
+
+                    if (Objects.equals(embeddingModel, "titan-v1")) {
+                        modelId = "amazon.titan-embed-text-v1";
+                    }
+                    else if (Objects.equals(embeddingModel, "titan-v2")) {
+                        modelId = "amazon.titan-embed-text-v2:0";
+                    }
 
                     // Prepare model invocation request
                     InvokeModelRequest request = InvokeModelRequest.builder()
-                            .modelId("amazon.titan-embed-text-v1")
+                            .modelId(modelId)
                             .contentType("application/json")
                             .accept("*/*")
                             .body(body)

@@ -1,5 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
-import {aws_logs, CustomResource, RemovalPolicy} from 'aws-cdk-lib';
+import {aws_logs, CfnParameter, CustomResource, RemovalPolicy} from 'aws-cdk-lib';
 import {Construct} from 'constructs';
 import * as opensearchserverless from 'aws-cdk-lib/aws-opensearchserverless';
 import * as kinesis from 'aws-cdk-lib/aws-kinesis';
@@ -14,6 +14,10 @@ import {Provider} from "aws-cdk-lib/custom-resources";
 export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    const EmbeddingModel = new CfnParameter(this, "EmbeddingModel", {
+      type: "String",
+      description: "Which Amazon Bedrock Model use for Embeddings (Titan V1 , Titan V2"});
 
 
     //Jar Connectors
@@ -294,7 +298,8 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
               'os.domain': cfnCollection.attrCollectionEndpoint,
               'os.custom.index': 'kds-flink-aoss-rag-index',
               'kinesis.source.stream': kinesisStream.streamName,
-              'region':this.region
+              'region':this.region,
+              'embedding.model': EmbeddingModel.valueAsString
             },
           }],
         },
@@ -390,6 +395,7 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
       timeout: cdk.Duration.seconds(300),
       environment: {
         aosDomain: cfnCollection.attrCollectionEndpoint,
+        embeddingModel: EmbeddingModel.valueAsString
       },
       initialPolicy: [
         new iam.PolicyStatement({

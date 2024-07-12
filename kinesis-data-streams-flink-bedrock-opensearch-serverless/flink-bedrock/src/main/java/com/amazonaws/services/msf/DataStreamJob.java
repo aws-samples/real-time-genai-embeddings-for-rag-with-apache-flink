@@ -61,11 +61,11 @@ public class DataStreamJob {
 	// Default configuration values
 	//private static final String DEFAULT_OS_DOMAIN = "search-aos-twitter-rag-vector-db-j5ohwaxoo43cegbliwembl3j6q.us-east-1.es.amazonaws.com";
 
-	private static final String DEFAULT_OS_DOMAIN = "https://g39sfuh9muc8wcun6x47.us-east-1.aoss.amazonaws.com";
+	private static final String DEFAULT_OS_DOMAIN = "";
 
-	private static final String DEFAULT_OS_TWITTER_CUSTOM_INDEX = "twitter-custom-rag-index";
-	private static final String DEFAULT_SOURCE_STREAM = "kds-source-rag";
-	private static final String DEFAULT_AWS_REGION = "us-east-1";
+	private static final String DEFAULT_OS_TWITTER_CUSTOM_INDEX = "";
+	private static final String DEFAULT_SOURCE_STREAM = "";
+	private static final String DEFAULT_AWS_REGION = "";
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(DataStreamJob.class);
 
@@ -119,6 +119,7 @@ public class DataStreamJob {
 
 		// OpenSearch configuration values
 		String osEndpoint = applicationProperties.get("os.domain", DEFAULT_OS_DOMAIN);
+		String embeddingModel = applicationProperties.get("embedding.model");
 		String osHost = osEndpoint.replace("https://", "");
 		String customMessageIndex = applicationProperties.get("os.custom.index", DEFAULT_OS_TWITTER_CUSTOM_INDEX);
 		String region = applicationProperties.get("region", DEFAULT_AWS_REGION);
@@ -146,7 +147,7 @@ public class DataStreamJob {
 
 		DataStream<JSONObject> customMessageEmbedded = AsyncDataStream.unorderedWait(
 				customMessageStream,
-				new BedRockEmbeddingModelAsyncCustomMessage(region),
+				new BedRockEmbeddingModelAsyncCustomMessage(region,embeddingModel),
 				15000,
 				TimeUnit.SECONDS,
 				1000
