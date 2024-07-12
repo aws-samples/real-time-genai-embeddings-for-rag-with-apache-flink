@@ -93,14 +93,33 @@ def lambda_handler(event, context):
     if host.startswith('https://'):
         host = host[len('https://'):]
 
-    # Initialize OpenSearch client
-    client = create_opensearch_client(host)
+    request_type = event['RequestType']
+    match request_type:
+        case 'Update':
+            print('Update of stack')
+            # Initialize OpenSearch client
+            client = create_opensearch_client(host)
 
-    # Create or check if index exists
-    create_index(client, index_name, index_body)
+            # Create or check if index exists
+            create_index(client, index_name, index_body)
 
-    # Example response
-    return {
-        'statusCode': 200,
-        'body': json.dumps('Index creation process completed')
-    }
+            # Example response
+            return {
+                'statusCode': 200,
+                'body': json.dumps('Index creation process completed')
+            }
+        case 'Delete':
+            print('Delete Function')
+        case 'Create':
+
+            # Initialize OpenSearch client
+            client = create_opensearch_client(host)
+
+            # Create or check if index exists
+            create_index(client, index_name, index_body)
+
+            # Example response
+            return {
+                'statusCode': 200,
+                'body': json.dumps('Index creation process completed')
+            }

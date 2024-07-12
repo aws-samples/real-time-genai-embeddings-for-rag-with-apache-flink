@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
-import { Construct } from 'constructs';
+import {aws_logs, CustomResource, RemovalPolicy} from 'aws-cdk-lib';
+import {Construct} from 'constructs';
 import * as opensearchserverless from 'aws-cdk-lib/aws-opensearchserverless';
 import * as kinesis from 'aws-cdk-lib/aws-kinesis';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -7,10 +8,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as kda from 'aws-cdk-lib/aws-kinesisanalyticsv2'
 import * as assets from 'aws-cdk-lib/aws-s3-assets'
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import {aws_logs, CustomResource, RemovalPolicy, SecretValue} from 'aws-cdk-lib';
 import {Provider} from "aws-cdk-lib/custom-resources";
-
-
 
 
 export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stack {
@@ -134,7 +132,8 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
 
     const logGroup = new logs.LogGroup(this, 'MyLogGroup', {
       retention: logs.RetentionDays.ONE_MONTH,
-      logGroupName: this.stackName+"log-group"// Adjust retention as needed
+      logGroupName: this.stackName+"-log-group",// Adjust retention as needed
+      removalPolicy: RemovalPolicy.DESTROY
     });
 
     const logStream = new logs.LogStream(this, 'MyLogStream', {
@@ -161,6 +160,16 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
       ],
     });
 
+    const aossPolicy = new iam.PolicyDocument({
+      statements: [
+        new iam.PolicyStatement({
+          resources: ['*'],
+          actions: ['aoss:*']
+        }),
+      ],
+    });
+
+
 
 
     const cfnCollection = new opensearchserverless.CfnCollection(this, 'OpssSearchCollection', {
@@ -178,7 +187,8 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
       description: 'BedRock Role',
       inlinePolicies: {
         BedRockRole: bedRockPolicy,
-        KinesisPolicy: kinesisPolicy
+        KinesisPolicy: kinesisPolicy,
+        AOSSPolicy: aossPolicy
       },
     });
 
@@ -191,7 +201,8 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
         KDAAccessPolicy: kdaAccessPolicy,
         AccessCWLogsPolicy: accessCWLogsPolicy,
         S3Policy: s3Policy,
-        KinesisPolicy:kinesisPolicy
+        KinesisPolicy:kinesisPolicy,
+        AOSSPolicy: aossPolicy
       },
     });
 
@@ -315,6 +326,41 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
     });
 
     managedFlinkApplication.node.addDependency(managedFlinkRole)
+
+
+    const startFlinkApplicationHandler = new lambda.Function(this, "startFlinkApplicationHandler", {
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromAsset("./startFlinkApplication"),
+      handler: "index.on_event",
+      timeout: cdk.Duration.minutes(14),
+      memorySize: 512
+    })
+
+    const startFlinkApplicationProvider = new Provider(this, "startFlinkApplicationProvider", {
+      onEventHandler: startFlinkApplicationHandler,
+      logRetention: aws_logs.RetentionDays.ONE_WEEK
+    })
+
+    startFlinkApplicationHandler.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        "kinesisanalytics:DescribeApplication",
+        "kinesisanalytics:StartApplication",
+        "kinesisanalytics:StopApplication",
+
+      ],
+      resources: [`arn:aws:kinesisanalytics:${this.region}:${this.account}:application/`+managedFlinkApplication.applicationName]
+    }))
+
+    const startFlinkApplicationResource = new CustomResource(this, "startFlinkApplicationResource", {
+      serviceToken: startFlinkApplicationProvider.serviceToken,
+      properties: {
+        AppName: managedFlinkApplication.applicationName,
+      }
+    })
+
+    startFlinkApplicationResource.node.addDependency(managedFlinkApplication);
+    startFlinkApplicationResource.node.addDependency(cfnCollection);
+
     cfnApplicationCloudWatchLoggingOption.node.addDependency(managedFlinkApplication)
     const kdsProducer = new lambda.Function(this, 'KDSProducer', {
       runtime: lambda.Runtime.PYTHON_3_10,
@@ -361,7 +407,7 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
     const LambdalogGroup = new logs.LogGroup(this, 'LambdaMyLogGroup', {
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
-      logGroupName: opensearchIndexCreationFunction.functionName// Adjust retention as needed
+      logGroupName: '/aws/lambda/'+opensearchIndexCreationFunction.functionName// Adjust retention as needed
     });
 
     const startLambdaIndexFunctionProvider = new Provider(this, "startLambdaIndexFunctionProvider", {
