@@ -11,6 +11,8 @@ import {Provider} from "aws-cdk-lib/custom-resources";
 import * as opensearch from 'aws-cdk-lib/aws-opensearchservice';
 import {EngineVersion} from "aws-cdk-lib/aws-opensearchservice";
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import {AnyPrincipal} from "aws-cdk-lib/aws-iam";
+import {IpAddresses} from "aws-cdk-lib/aws-ec2";
 
 
 export class KinesisDataStreamsFlinkBedrockOpensearchProvisioned extends cdk.Stack {
@@ -20,6 +22,11 @@ export class KinesisDataStreamsFlinkBedrockOpensearchProvisioned extends cdk.Sta
     const EmbeddingModel = new CfnParameter(this, "EmbeddingModel", {
       type: "String",
       description: "Which Amazon Bedrock Model use for Embeddings (Titan V1 , Titan V2"});
+
+    const IPAddress = new CfnParameter(this, "IPAddress", {
+      type: "String",
+      description: "IP Address to access OpenSearch Dashboard. It has to be in CIDR Range format"});
+
 
 
     //Jar Connectors
@@ -172,6 +179,17 @@ export class KinesisDataStreamsFlinkBedrockOpensearchProvisioned extends cdk.Sta
           principals: [new iam.ArnPrincipal(managedFlinkRole.roleArn),new iam.ArnPrincipal(LambdaBedRockRole.roleArn)],
           actions: ['es:ESHttp*'],
           resources: [opensearchRAGDatabase.domainArn + "/*"],
+        }),
+        new iam.PolicyStatement({
+          principals:[new AnyPrincipal()],
+          actions: ['es:ESHttp*'],
+          resources: [opensearchRAGDatabase.domainArn + "/*"],
+          conditions: {
+            'IpAddress': {
+              'aws:SourceIp': IPAddress.valueAsString
+            }
+          }
+
         })
     );
 
