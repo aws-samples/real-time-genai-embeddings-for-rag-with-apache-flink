@@ -9,9 +9,12 @@ import * as kda from 'aws-cdk-lib/aws-kinesisanalyticsv2'
 import * as assets from 'aws-cdk-lib/aws-s3-assets'
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import {Provider} from "aws-cdk-lib/custom-resources";
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import {MSKServerlessContruct} from "./msk-serverless-construct";
+import * as python from '@aws-cdk/aws-lambda-python-alpha'
+import {SubnetType} from "aws-cdk-lib/aws-ec2";
 
-
-export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stack {
+export class MsksFlinkBedrockOpensearchServerless extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
@@ -25,7 +28,75 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
       path: ('./flink-bedrock/target/flink-bedrock-1.0-SNAPSHOT.jar'),
     });
 
-    const collectionName = 'kds-vector-db-cdk'; // Example collection name
+    const vpc = new ec2.Vpc(this, 'VPC', {
+      enableDnsHostnames: true,
+      enableDnsSupport: true,
+      maxAzs: 3,
+      natGateways: 1,
+      subnetConfiguration: [
+        {
+          cidrMask: 24,
+          name: 'public-subnet',
+          subnetType: ec2.SubnetType.PUBLIC,
+        },
+        {
+          cidrMask: 24,
+          name: 'private-subnet',
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+        }
+      ],
+    });
+
+    // security group for MSK access
+    const mskSG = new ec2.SecurityGroup(this, 'mskSG', {
+      vpc: vpc,
+      allowAllOutbound: true,
+      description: 'MSK Security Group'
+    });
+
+    mskSG.connections.allowInternally(ec2.Port.allTraffic(), 'Allow all traffic between hosts having the same security group');
+
+    // instantiate serverless MSK cluster w/ IAM auth
+    const serverlessMskCluster = new MSKServerlessContruct(this, 'MSKServerless', {
+      account: this.account,
+      region: this.region,
+      vpc: vpc,
+      clusterName: this.stackName,
+      mskSG: mskSG,
+    });
+
+    serverlessMskCluster.node.addDependency(vpc);
+
+    //AccessVPCPolicy
+    const accessVPCPolicy = new iam.PolicyDocument({
+      statements: [
+        new iam.PolicyStatement({
+          resources: ['*'],
+          actions: ['ec2:DeleteNetworkInterface',
+            'ec2:DescribeDhcpOptions',
+            'ec2:DescribeSecurityGroups',
+            'ec2:CreateNetworkInterface',
+            'ec2:DescribeNetworkInterfaces',
+            'ec2:CreateNetworkInterfacePermission',
+            'ec2:DescribeVpcs',
+            'ec2:DescribeSubnets'],
+        }),
+      ],
+    });
+
+    //Access MSK
+    const accessMSKPolicy = new iam.PolicyDocument({
+      statements: [
+        new iam.PolicyStatement({
+          resources: ["*"],
+          actions: ['kafka-cluster:*'],
+        }),
+      ],
+    });
+
+
+
+    const collectionName = 'msks-vector-db'; // Example collection name
     // Define CFN parameters
     const s3Bucket = new cdk.CfnParameter(this, 's3BucketARN', {
       type: 'String',
@@ -102,27 +173,6 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
       ],
     });
 
-    // Create a Kinesis Data Stream
-    const kinesisStream = new kinesis.Stream(this, 'MyKinesisStream', {
-      streamName: "kds-aoss-source-rag",
-      shardCount: 1, // You can adjust the number of shards based on your requirements,
-    });
-
-    // our KDA app needs to be able to log
-    const kinesisPolicy = new iam.PolicyDocument({
-      statements: [
-        new iam.PolicyStatement({
-          resources: [kinesisStream.streamArn],
-          actions: ["kinesis:DescribeStream",
-            "kinesis:GetShardIterator",
-            "kinesis:GetRecords",
-            "kinesis:PutRecord",
-            "kinesis:PutRecords",
-            "kinesis:ListShards"
-          ]
-        }),
-      ],
-    });
 
     const bedRockPolicy = new iam.PolicyDocument({
       statements: [
@@ -191,8 +241,9 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
       description: 'BedRock Role',
       inlinePolicies: {
         BedRockRole: bedRockPolicy,
-        KinesisPolicy: kinesisPolicy,
-        AOSSPolicy: aossPolicy
+        MSKPolicy: accessMSKPolicy,
+        AOSSPolicy: aossPolicy,
+        VPCPolicy: accessVPCPolicy
       },
     });
 
@@ -205,8 +256,9 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
         KDAAccessPolicy: kdaAccessPolicy,
         AccessCWLogsPolicy: accessCWLogsPolicy,
         S3Policy: s3Policy,
-        KinesisPolicy:kinesisPolicy,
-        AOSSPolicy: aossPolicy
+        MSKPolicy: accessMSKPolicy,
+        AOSSPolicy: aossPolicy,
+        VPCPolicy: accessVPCPolicy
       },
     });
 
@@ -275,7 +327,7 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
 
 
     const managedFlinkApplication = new kda.CfnApplication(this, 'Managed Flink Application', {
-      applicationName: 'kds-msf-aoss',
+      applicationName: 'msk-msf-aoss',
       runtimeEnvironment: 'FLINK-1_18',
       serviceExecutionRole: managedFlinkRole.roleArn,
       applicationConfiguration: {
@@ -291,13 +343,21 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
         applicationSnapshotConfiguration: {
           snapshotsEnabled: true
         },
+        vpcConfigurations: [ {
+          subnetIds: vpc.selectSubnets({
+            subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+          }).subnetIds,
+          securityGroupIds: [mskSG.securityGroupId]
+        }
+        ],
         environmentProperties: {
           propertyGroups: [{
             propertyGroupId: 'FlinkApplicationProperties',
             propertyMap: {
               'os.domain': cfnCollection.attrCollectionEndpoint,
-              'os.custom.index': 'kds-flink-aoss-rag-index',
-              'kinesis.source.stream': kinesisStream.streamName,
+              'os.custom.index': 'msk-flink-aoss-rag-index',
+              'source.bootstrap.servers': serverlessMskCluster.bootstrapServersOutput.value,
+              'source.topic': 'msk-rag-topic',
               'region':this.region,
               'embedding.model': EmbeddingModel.valueAsString
             },
@@ -324,13 +384,81 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
 
 
     const cfnApplicationCloudWatchLoggingOption= new kda.CfnApplicationCloudWatchLoggingOption(this,"managedFlinkLogs", {
-      applicationName: "kds-msf-aoss",
+      applicationName: "msk-msf-aoss",
       cloudWatchLoggingOption: {
         logStreamArn: "arn:aws:logs:" + this.region + ":" + this.account + ":log-group:"+logGroup.logGroupName+":log-stream:" + logStream.logStreamName,
       },
     });
 
     managedFlinkApplication.node.addDependency(managedFlinkRole)
+    managedFlinkApplication.node.addDependency(serverlessMskCluster)
+
+    const kafkaClientLayer = new python.PythonLayerVersion(this, 'MyLayer', {
+      entry: './lambda-python-layer/',
+      compatibleArchitectures: [lambda.Architecture.X86_64],
+      compatibleRuntimes: [lambda.Runtime.PYTHON_3_11],
+      bundling: {
+        platform: 'linux/amd64',
+      }
+    })
+
+    const mskproducer = new lambda.Function(this, "mskproducer", {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'lambda_function.lambda_handler',
+      role: LambdaBedRockRole,
+      code: lambda.Code.fromAsset('./msk-producer-lambda'),
+      vpc:vpc,
+      securityGroups:[mskSG],
+      vpcSubnets: {subnetType: SubnetType.PRIVATE_WITH_EGRESS},
+      timeout: cdk.Duration.minutes(14),
+      memorySize: 512,
+      environment: {
+        BOOTSTRAP_SERVERS: serverlessMskCluster.bootstrapServersOutput.value,
+        region: this.region,
+        TOPIC_NAME: 'msk-rag-topic',
+      },
+    })
+
+    mskproducer.addLayers(kafkaClientLayer);
+
+    const createTopic = new lambda.Function(this, "createTopic", {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      code: lambda.Code.fromAsset("./topicCreation"),
+      vpc:vpc,
+      securityGroups:[mskSG],
+      vpcSubnets: {subnetType: SubnetType.PRIVATE_WITH_EGRESS},
+      role: LambdaBedRockRole,
+      handler: "index.on_event",
+      timeout: cdk.Duration.minutes(14),
+      memorySize: 512
+    })
+
+    createTopic.addLayers(kafkaClientLayer)
+
+    const createTopicProvider = new Provider(this, "createTopicProvider", {
+      onEventHandler: createTopic,
+      logRetention: aws_logs.RetentionDays.ONE_WEEK
+    })
+
+    createTopic.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        "kafka-cluster:*"
+
+      ],
+      resources: [serverlessMskCluster.cfnClusterArnOutput.value]
+    }))
+
+    const createTopicResource = new CustomResource(this, "createTopicResource", {
+      serviceToken: createTopicProvider.serviceToken,
+      properties: {
+        topic_name: 'msk-rag-topic',
+        region: this.region,
+        bootstrap_servers: serverlessMskCluster.bootstrapServersOutput.value,
+        num_partitions: 3,
+        replication_factor:3
+      }
+    })
+
 
 
     const startFlinkApplicationHandler = new lambda.Function(this, "startFlinkApplicationHandler", {
@@ -365,28 +493,12 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
 
     startFlinkApplicationResource.node.addDependency(managedFlinkApplication);
     startFlinkApplicationResource.node.addDependency(cfnCollection);
+    startFlinkApplicationResource.node.addDependency(createTopicResource);
 
     cfnApplicationCloudWatchLoggingOption.node.addDependency(managedFlinkApplication)
-    const kdsProducer = new lambda.Function(this, 'KDSProducer', {
-      runtime: lambda.Runtime.PYTHON_3_10,
-      handler: 'lambda_function.lambda_handler',
-      role: LambdaBedRockRole,
-      code: lambda.Code.fromAsset('./kds-producer-lambda'),
-      memorySize: 2048,
-      timeout: cdk.Duration.seconds(300),
-      environment: {
-        kds: kinesisStream.streamName,
-      },
-      initialPolicy: [
-        new iam.PolicyStatement({
-          actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
-          resources: ['arn:aws:logs:' + this.region + ":" + this.account + ':log-group:/aws/lambda/kds-producer'],
-        })
-      ]
-    });
+
     const opensearchIndexCreationFunction = new lambda.Function(this, 'OpenSearch Index Creation Function', {
       runtime: lambda.Runtime.PYTHON_3_10,
-      functionName: "opensearch-index-function",
       handler: 'lambda_function.lambda_handler',
       role: LambdaBedRockRole,
       code: lambda.Code.fromAsset('./index-creation-function'),
@@ -425,8 +537,6 @@ export class KinesisDataStreamsFlinkBedrockOpensearchServerless extends cdk.Stac
     })
 
     startLambdaIndexFunctionResource.node.addDependency(cfnCollection)
-
-
 
     // Outputs
     new cdk.CfnOutput(this, 'OpenSearchEndpoint', {
