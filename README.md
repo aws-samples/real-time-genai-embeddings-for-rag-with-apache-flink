@@ -41,19 +41,29 @@ In every sample the steps to deploy are the following:
 - Go back to the Streaming RAG GenAI Solution directory
 - Boostrap your environment *cdk bootstrap*
 - Deploy the solution, specifying which embedding model you want to use: *cdk deploy --parameters EmbeddingModel=titan-v2*
+  - You can use
+    - titan-v1
+    - titan-v2
 
-You can set
-- titan-v1
-- titan-v2
+- If you are using the Provisioned OpenSearch Examples you need to add an additional parameter for your IP Address so you can access OpenSearch Dashboards
 
+*cdk deploy --parameters EmbeddingModel=titan-v2 --parameters IPAddress=<ip-address>/32* 
 
-##
-TODO: Fill this README out!
+Lastly if you wish to send messages you can use the following lambda functions
+- KDS Producer
+- MSK Producer 
 
-Be sure to:
+Configure a test event as follow:
 
-* Change the title in this README
-* Edit your repository description on GitHub
+```
+{"text": "Hello World}
+```
+The lambda function will add an additional field which is the current date, and send to the Amazon Kiensis Data Streams or Amazon MSK Cluster
+
+## Further Development
+
+We will continue to include other Embedding Models for Amazon Bedrock and more Vector Databases
+
 
 ## Security
 

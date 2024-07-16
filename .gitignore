@@ -8,3 +8,5 @@ kinesis-data-streams-flink-bedrock-opensearch-serverless/flink-bedrock/.idea/
 kinesis-data-streams-flink-bedrock-opensearch-provisioned/flink-bedrock/.idea/
 msks-flink-bedrock-opensearch-serverless/flink-bedrock/.idea/
 msks-flink-bedrock-opensearch-serverless/flink-bedrock/target/
+msk-flink-bedrock-opensearch-serverless/flink-bedrock/.idea/
+msk-flink-bedrock-opensearch-serverless/flink-bedrock/target/
